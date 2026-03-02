@@ -1,13 +1,18 @@
 """模型调用客户端"""
+import asyncio
+import logging
 import httpx
 from typing import List, Dict, Any, Optional
 from src.config import (
     DEBUG_MODE,
-    KIMI_BASE_URL,
-    KIMI_API_KEY,
-    KIMI_MODEL,
+    DEBUG_BASE_URL,
+    DEBUG_API_KEY,
+    DEBUG_MODEL,
+    DISABLE_THINKING,
     MODEL_PORT,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ModelClient:
@@ -21,37 +26,57 @@ class ModelClient:
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.7,
+        max_retries: int = 3,
     ) -> dict:
-        """调用模型进行对话补全"""
-        if self.debug_mode:
-            # 调试模式：使用 Kimi
-            return await self._call_kimi(messages, tools, temperature)
-        else:
-            # 评测模式：使用判题器提供的模型
-            return await self._call_judge_model(messages, tools, temperature)
+        """调用模型进行对话补全，支持自动重试"""
+        last_exc = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                if self.debug_mode:
+                    return await self._call_debug_model(messages, tools, temperature)
+                else:
+                    return await self._call_judge_model(messages, tools, temperature)
+            except (
+                httpx.ConnectError,
+                httpx.ReadTimeout,
+                httpx.WriteTimeout,
+                httpx.RemoteProtocolError,
+                httpx.ProxyError,
+            ) as e:
+                last_exc = e
+                if attempt < max_retries:
+                    wait = attempt * 3
+                    logger.warning(f"Model call failed (attempt {attempt}/{max_retries}): {type(e).__name__}: {e}, retrying in {wait}s")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"Model call failed after {max_retries} attempts: {e}")
+        raise last_exc
 
-    async def _call_kimi(
+    async def _call_debug_model(
         self,
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]],
         temperature: float,
     ) -> dict:
-        """调用 Kimi 模型（调试用）"""
+        """调用本地调试模型（DashScope OpenAI 兼容接口，默认 Qwen3.5-27B）"""
         headers = {
-            "Authorization": f"Bearer {KIMI_API_KEY}",
+            "Authorization": f"Bearer {DEBUG_API_KEY}",
             "Content-Type": "application/json",
         }
         payload = {
-            "model": KIMI_MODEL,
+            "model": DEBUG_MODEL,
             "messages": messages,
             "temperature": temperature,
         }
         if tools:
             payload["tools"] = tools
+        # 关闭 Qwen thinking 模式，避免 <think> tokens 消耗配额
+        if DISABLE_THINKING:
+            payload["enable_thinking"] = False
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
             r = await client.post(
-                f"{KIMI_BASE_URL}/chat/completions",
+                f"{DEBUG_BASE_URL}/chat/completions",
                 json=payload,
                 headers=headers,
             )
@@ -73,7 +98,7 @@ class ModelClient:
             headers["Session-ID"] = self.session_id
 
         payload = {
-            "model": "",  # 评测环境模型可以为空
+            "model": "",  # 评测环境模型名由判题器决定
             "messages": messages,
             "temperature": temperature,
             "stream": False,
