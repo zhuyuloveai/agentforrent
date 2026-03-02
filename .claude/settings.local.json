@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install -r requirements.txt -q 2>&1 | tail -5)",
+      "Bash(python3 -m pip install -r requirements.txt -q 2>&1 | tail -5)",
+      "Bash(python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -q 2>&1 | tail -5)",
+      "Bash(.venv/bin/pip install -r requirements.txt -q --trusted-host pypi.org --trusted-host files.pythonhosted.org 2>&1 | tail -5)",
+      "Bash(chmod +x /Users/zhuyu/work/agentforrent/start.sh && USER_ID=\"z00881489\" KIMI_API_KEY=\"sk-h89WVk9jykrKrvl04SdUzvlTqKvFcZ1VFxOPMIpKAU3DyGs2\" DEBUG_MODE=\"true\" .venv/bin/python3 -c \"from src.agent.core import run; from src.tools.model_client import ModelClient; print\\('imports ok'\\)\")",
+      "Bash(curl -s -X POST http://localhost:8191/api/v1/chat \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\n    \"session_id\": \"test001\",\n    \"message\": \"你好\"\n  }' | python3 -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:8191/api/v1/chat \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\n    \"session_id\": \"test002\",\n    \"message\": \"帮我找海淀区两居室，预算8000以内，要近地铁\"\n  }' | python3 -m json.tool)",
+      "Bash(pkill -f \"uvicorn src.main:app\")",
+      "Bash(.venv/bin/pip show httpx 2>/dev/null | head -1)",
+      "Bash(gh repo view zxx-sqq/AgentGameFakeAppApi 2>/dev/null || echo \"need web fetch\")",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api repos/zxx-sqq/AgentGameFakeAppApi/contents 2>&1)",
+      "Bash(curl -s https://api.github.com/repos/zxx-sqq/AgentGameFakeAppApi/contents | python3 -m json.tool 2>&1 | head -60)",
+      "Bash(curl -s https://raw.githubusercontent.com/zxx-sqq/AgentGameFakeAppApi/main/README.md)",
+      "Bash(curl -s https://raw.githubusercontent.com/zxx-sqq/AgentGameFakeAppApi/main/fake_app_agent_tools.json)",
+      "Bash(lsof -ti:8080 | xargs kill -9 2>/dev/null; sleep 1)",
+      "Bash(curl -s \"http://localhost:8080/api/landmarks/search?q=%E8%A5%BF%E4%BA%8C%E6%97%97\" | python3 -m json.tool | head -30)",
+      "Bash(curl -s -X POST http://localhost:8191/api/v1/chat \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\"session_id\":\"test001\",\"message\":\"你好\"}' | python3 -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:8191/api/v1/chat \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\"session_id\":\"test002\",\"message\":\"帮我找海淀区两居室，预算8000以内，要近地铁\"}' | python3 -m json.tool)",
+      "Bash(sleep 2 && curl -s http://localhost:8191/health)"
+    ]
+  }
+}
