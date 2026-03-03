@@ -24,5 +24,11 @@ DISABLE_THINKING = os.getenv("DISABLE_THINKING", "true").lower() == "true"
 # 模型调用端口（评测环境）
 MODEL_PORT = 8888
 
+# 模型调用接口版本（v1=计入评测统计，需Session-ID；v2=不计统计，调测用）
+MODEL_API_VERSION = os.getenv("MODEL_API_VERSION", "v1")
+
+# 评测模型调用超时时间（秒）
+MODEL_TIMEOUT = float(os.getenv("MODEL_TIMEOUT", "120"))
+
 # 是否调试模式（true=本地 Qwen，false=使用评测模型）
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"

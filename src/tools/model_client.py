@@ -1,5 +1,6 @@
 """模型调用客户端"""
 import asyncio
+import json
 import logging
 import httpx
 from typing import List, Dict, Any, Optional
@@ -10,6 +11,8 @@ from src.config import (
     DEBUG_MODEL,
     DISABLE_THINKING,
     MODEL_PORT,
+    MODEL_API_VERSION,
+    MODEL_TIMEOUT,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,18 @@ class ModelClient:
                     return await self._call_debug_model(messages, tools, temperature)
                 else:
                     return await self._call_judge_model(messages, tools, temperature)
+            except httpx.HTTPStatusError as e:
+                # 5xx 服务端错误（如 504 Gateway Timeout）才重试，4xx 不重试
+                if e.response.status_code >= 500:
+                    last_exc = e
+                    if attempt < max_retries:
+                        wait = attempt * 5
+                        logger.warning(f"Model call HTTP {e.response.status_code} (attempt {attempt}/{max_retries}), retrying in {wait}s")
+                        await asyncio.sleep(wait)
+                    else:
+                        logger.error(f"Model call failed after {max_retries} attempts: {e}")
+                else:
+                    raise
             except (
                 httpx.ConnectError,
                 httpx.ReadTimeout,
@@ -106,8 +121,17 @@ class ModelClient:
         if tools:
             payload["tools"] = tools
 
-        url = f"http://{self.model_ip}:{MODEL_PORT}/v1/chat/completions"
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-            return r.json()
+        url = f"http://{self.model_ip}:{MODEL_PORT}/{MODEL_API_VERSION}/chat/completions"
+        async with httpx.AsyncClient(timeout=MODEL_TIMEOUT) as client:
+            try:
+                r = await client.post(url, json=payload, headers=headers)
+                r.raise_for_status()
+                return r.json()
+            except Exception as e:
+                logger.error(
+                    f"Judge model request failed: {e}\n"
+                    f"  URL: POST {url}\n"
+                    f"  Headers: {headers}\n"
+                    f"  Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}"
+                )
+                raise
