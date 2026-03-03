@@ -30,5 +30,11 @@ MODEL_API_VERSION = os.getenv("MODEL_API_VERSION", "v1")
 # 评测模型调用超时时间（秒）
 MODEL_TIMEOUT = float(os.getenv("MODEL_TIMEOUT", "120"))
 
+# 评测模型最大输出 token 数（限制输出长度，避免超时；0=不限制）
+MODEL_MAX_TOKENS = int(os.getenv("MODEL_MAX_TOKENS", "1024"))
+
+# 评测模型调用温度
+MODEL_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.3"))
+
 # 是否调试模式（true=本地 Qwen，false=使用评测模型）
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"

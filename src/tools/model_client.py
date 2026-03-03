@@ -13,6 +13,8 @@ from src.config import (
     MODEL_PORT,
     MODEL_API_VERSION,
     MODEL_TIMEOUT,
+    MODEL_MAX_TOKENS,
+    MODEL_TEMPERATURE,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,24 +110,31 @@ class ModelClient:
         if not self.model_ip:
             raise ValueError("model_ip is required in evaluation mode")
 
-        headers = {"Content-Type": "application/json"}
-        if self.session_id:
-            headers["Session-ID"] = self.session_id
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer sk-placeholder",
+        }
+        if self.model_ip:
+            headers["Session-ID"] = self.model_ip
 
         payload = {
             "model": "",  # 评测环境模型名由判题器决定
             "messages": messages,
-            "temperature": temperature,
+            "temperature": MODEL_TEMPERATURE,
             "stream": False,
+            "tools": tools if tools else [],
         }
-        if tools:
-            payload["tools"] = tools
+        if MODEL_MAX_TOKENS > 0:
+            payload["max_tokens"] = MODEL_MAX_TOKENS
 
         url = f"http://{self.model_ip}:{MODEL_PORT}/{MODEL_API_VERSION}/chat/completions"
         async with httpx.AsyncClient(timeout=MODEL_TIMEOUT) as client:
             try:
+                t0 = asyncio.get_event_loop().time()
                 r = await client.post(url, json=payload, headers=headers)
+                elapsed = asyncio.get_event_loop().time() - t0
                 r.raise_for_status()
+                logger.info(f"Judge model OK in {elapsed:.1f}s (session={self.session_id})")
                 return r.json()
             except Exception as e:
                 logger.error(
