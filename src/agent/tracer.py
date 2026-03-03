@@ -4,8 +4,16 @@
 供事后分析定位问题出在哪个阶段：模型理解、工具调用、结果解析。
 """
 import json
+import math
 import time
 from typing import Optional
+
+
+def _tokens_to_slices(total_tokens: int) -> int:
+    """按比赛公式将单次模型调用的 token 数换算为时间片（向上取整）。
+    公式：t = 1 + max(0, (n - 1000)) × 0.3
+    """
+    return math.ceil(1 + max(0, (total_tokens - 1000) * 0.3))
 
 
 class RunTracer:
@@ -99,6 +107,7 @@ class RunTracer:
     def to_dict(self) -> dict:
         total_ms = int((time.time() - self._start) * 1000)
         total_tokens = sum(c.get("total_tokens", 0) for c in self.llm_calls)
+        total_slices = sum(_tokens_to_slices(c.get("total_tokens", 0)) for c in self.llm_calls)
         return {
             "session_id": self.session_id,
             "turn": self.turn,
@@ -115,6 +124,7 @@ class RunTracer:
                 "llm_call_count": len(self.llm_calls),
                 "tool_call_count": len(self.tool_calls),
                 "total_tokens": total_tokens,
+                "time_slices": total_slices,
                 "houses_count": len(self.houses_returned),
                 "diagnosis": _diagnose(self),
             },

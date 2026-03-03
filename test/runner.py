@@ -28,7 +28,7 @@ import httpx
 
 from src.agent.core import run
 from src.agent.session import session_manager
-from src.agent.tracer import RunTracer
+from src.agent.tracer import RunTracer, _tokens_to_slices
 from src.config import RENT_API_BASE, USER_ID
 from test.cases import (
     TestCase, WriteOp, NearbyBaseline, LandmarkNameBaseline,
@@ -281,6 +281,8 @@ async def run_case(case: TestCase, verbose: bool = True) -> dict:
     agent_houses: List[str] = []
     per_turn_houses: List[List[str]] = []  # 每轮各自解析到的 houses，用于精确评分
     all_tool_results: List[dict] = []
+    case_total_tokens: int = 0
+    case_total_slices: int = 0
     start_ts = time.time()
 
     for i, user_msg in enumerate(case.turns):
@@ -305,6 +307,11 @@ async def run_case(case: TestCase, verbose: bool = True) -> dict:
         resp_str = result["response"]
         tools_used = [t["name"] for t in round_tools]
 
+        # 累计 token / 时间片
+        t_summary = tracer.to_dict()["summary"]
+        case_total_tokens += t_summary.get("total_tokens", 0)
+        case_total_slices += t_summary.get("time_slices", 0)
+
         turn_houses: List[str] = []
         try:
             resp_data = json.loads(resp_str)
@@ -313,16 +320,16 @@ async def run_case(case: TestCase, verbose: bool = True) -> dict:
             msg_preview = resp_data.get("message", "")[:50]
             if verbose:
                 houses_preview = str(agent_houses[:5]) + ("..." if len(agent_houses) > 5 else "")
-                diagnosis = tracer.to_dict()["summary"]["diagnosis"]
+                diagnosis = t_summary["diagnosis"]
                 diag_str = " | ".join(diagnosis)
                 print(f"  << [{','.join(tools_used) or '无工具'}] {msg_preview}")
                 print(f"     houses({len(agent_houses)}): {houses_preview}")
-                print(f"     诊断: {diag_str}")
+                print(f"     tokens={t_summary['total_tokens']} slices={t_summary['time_slices']}  诊断: {diag_str}")
         except Exception:
             if verbose:
-                diagnosis = tracer.to_dict()["summary"]["diagnosis"]
+                diagnosis = t_summary["diagnosis"]
                 print(f"  << [{','.join(tools_used) or '无工具'}] {resp_str[:80]}")
-                print(f"     诊断: {' | '.join(diagnosis)}")
+                print(f"     tokens={t_summary['total_tokens']} slices={t_summary['time_slices']}  诊断: {' | '.join(diagnosis)}")
         per_turn_houses.append(turn_houses)
 
     elapsed = int((time.time() - start_ts) * 1000)
@@ -337,6 +344,8 @@ async def run_case(case: TestCase, verbose: bool = True) -> dict:
         "baseline": baseline,
         "score": 0.0,
         "write_op_results": [],
+        "total_tokens": case_total_tokens,
+        "time_slices": case_total_slices,
         "elapsed_ms": elapsed,
     }
 
@@ -436,7 +445,7 @@ async def run_case(case: TestCase, verbose: bool = True) -> dict:
                       f"调整后得分: {adjusted}/{case.full_score}")
 
     if verbose:
-        print(f"  耗时: {elapsed}ms")
+        print(f"  耗时: {elapsed}ms  tokens={case_total_tokens}  时间片={case_total_slices}")
 
     return result_data
 
@@ -449,6 +458,8 @@ async def run_all(cases: List[TestCase] = None, verbose: bool = True) -> List[di
     """运行全部（或指定）用例并打印汇总"""
     if cases is None:
         cases = ALL_CASES
+
+    SLICE_BUDGET = 300
 
     all_results = []
     type_stats: dict = {}
@@ -470,36 +481,48 @@ async def run_all(cases: List[TestCase] = None, verbose: bool = True) -> List[di
                 "baseline": [],
                 "write_op_results": [],
                 "elapsed_ms": 0,
+                "total_tokens": 0,
+                "time_slices": 0,
             }
         all_results.append(res)
 
         t = res["case_type"]
         if t not in type_stats:
-            type_stats[t] = {"score": 0.0, "full": 0, "count": 0}
+            type_stats[t] = {"score": 0.0, "full": 0, "count": 0, "tokens": 0, "slices": 0}
         type_stats[t]["score"] += res["score"]
         type_stats[t]["full"] += res["full_score"]
         type_stats[t]["count"] += 1
+        type_stats[t]["tokens"] += res.get("total_tokens", 0)
+        type_stats[t]["slices"] += res.get("time_slices", 0)
 
     total_score = sum(r["score"] for r in all_results)
     total_full = sum(r["full_score"] for r in all_results)
+    total_tokens = sum(r.get("total_tokens", 0) for r in all_results)
+    total_slices = sum(r.get("time_slices", 0) for r in all_results)
     skipped = [r for r in all_results if r.get("skipped")]
 
-    print(f"\n{'='*62}")
+    print(f"\n{'='*72}")
     print(f"  测试结果汇总")
-    print(f"{'-'*62}")
-    print(f"  {'类型':<10} {'题数':>5} {'得分':>10} {'满分':>8} {'命中率':>8}")
-    print(f"{'-'*62}")
+    print(f"{'-'*72}")
+    print(f"  {'类型':<10} {'题数':>5} {'得分':>10} {'满分':>8} {'命中率':>8} {'tokens':>10} {'时间片':>7}")
+    print(f"{'-'*72}")
     for t in ["Chat", "Single", "Multi"]:
         if t in type_stats:
             s = type_stats[t]
             pct = s["score"] / s["full"] * 100 if s["full"] else 0
-            print(f"  {t:<10} {s['count']:>5} {s['score']:>10.1f} {s['full']:>8} {pct:>7.1f}%")
-    print(f"{'-'*62}")
+            print(f"  {t:<10} {s['count']:>5} {s['score']:>10.1f} {s['full']:>8} {pct:>7.1f}%"
+                  f" {s['tokens']:>10} {s['slices']:>7}")
+    print(f"{'-'*72}")
     pct = total_score / total_full * 100 if total_full else 0
-    print(f"  {'合计':<10} {len(all_results):>5} {total_score:>10.1f} {total_full:>8} {pct:>7.1f}%")
+    remaining = SLICE_BUDGET - total_slices
+    print(f"  {'合计':<10} {len(all_results):>5} {total_score:>10.1f} {total_full:>8} {pct:>7.1f}%"
+          f" {total_tokens:>10} {total_slices:>7}")
+    print(f"{'-'*72}")
+    print(f"  时间片预算: {SLICE_BUDGET}  已消耗: {total_slices}  剩余: {remaining}"
+          f"  {'[警告: 已超出预算!]' if remaining < 0 else ''}")
     if skipped:
         print(f"  跳过用例({len(skipped)}): {', '.join(r['case_id'] for r in skipped)}")
-    print(f"{'='*62}\n")
+    print(f"{'='*72}\n")
 
     return all_results
 
