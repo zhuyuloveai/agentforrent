@@ -18,7 +18,10 @@
 import argparse
 import asyncio
 import json
+import os
+import sys
 import time
+from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -37,6 +40,39 @@ from test.cases import (
 
 _HEADERS = {"X-User-ID": USER_ID}
 _COUNTER = 0  # 保证每次运行 session_id 唯一
+
+
+class _Tee:
+    """同时写入 stdout 和日志文件"""
+    def __init__(self, log_path: str):
+        self._file = open(log_path, "w", encoding="utf-8")
+        self._stdout = sys.stdout
+
+    def write(self, data):
+        self._stdout.write(data)
+        self._file.write(data)
+
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+
+    def close(self):
+        self._file.close()
+
+    # 透传 isatty，避免部分库检测失败
+    def isatty(self):
+        return self._stdout.isatty()
+
+
+def _setup_log() -> tuple[str, "_Tee"]:
+    """在 logs/ 目录下创建带时间戳的日志文件，返回 (路径, Tee 对象)"""
+    logs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(logs_dir, f"test_results_{ts}.log")
+    tee = _Tee(log_path)
+    sys.stdout = tee
+    return log_path, tee
 
 
 # ──────────────────────────────────────────────────────────
@@ -81,6 +117,7 @@ async def _get_baseline(case: TestCase) -> List[str]:
     - baseline_nearby：调用 /api/houses/nearby（已知 landmark_id）
     - baseline_landmark：动态查找 landmark_id，再调用 /api/houses/nearby
     - baseline_community：调用 /api/houses/by_community
+    - baseline_queries：多次调用 /api/houses/by_platform 取并集（跨区 OR 查询）
     - baseline_query：直接调用 /api/houses/by_platform
     - 全为 None（Chat 类）：返回空列表
     """
@@ -128,6 +165,18 @@ async def _get_baseline(case: TestCase) -> List[str]:
             "page_size": 100,
         })
         return _parse_houses_from_api(data)
+
+    if case.baseline_queries:
+        # 多次查询取并集（用于跨区 OR 场景，如 SC7）
+        all_ids: list = []
+        seen: set = set()
+        for q in case.baseline_queries:
+            data = await _api_get("/api/houses/by_platform", q)
+            for hid in _parse_houses_from_api(data):
+                if hid not in seen:
+                    seen.add(hid)
+                    all_ids.append(hid)
+        return all_ids
 
     if case.baseline_query is None:
         return []
@@ -294,6 +343,7 @@ async def run_case(case: TestCase, verbose: bool = True) -> dict:
     # ── 空基准集警告（非 Chat 类，且定义了基准集来源但结果为空）──
     has_baseline_def = any([
         case.baseline_query is not None,
+        case.baseline_queries is not None,
         case.baseline_nearby is not None,
         case.baseline_landmark is not None,
         case.baseline_community is not None,
@@ -479,20 +529,27 @@ async def _main():
     args = _parse_args()
     verbose = not args.no_verbose
 
-    # 筛选用例
-    cases = list(ALL_CASES)
-    if args.type:
-        cases = [c for c in cases if c.case_type == args.type]
-    if args.id:
-        id_set = set(args.id)
-        cases = [c for c in cases if c.id in id_set]
+    log_path, tee = _setup_log()
 
-    if not cases:
-        print("没有匹配的用例，请检查 --type 或 --id 参数。")
-        return
+    try:
+        # 筛选用例
+        cases = list(ALL_CASES)
+        if args.type:
+            cases = [c for c in cases if c.case_type == args.type]
+        if args.id:
+            id_set = set(args.id)
+            cases = [c for c in cases if c.id in id_set]
 
-    print(f"\n准备运行 {len(cases)} 个用例，满分 {sum(c.full_score for c in cases)} 分")
-    await run_all(cases, verbose=verbose)
+        if not cases:
+            print("没有匹配的用例，请检查 --type 或 --id 参数。")
+            return
+
+        print(f"\n准备运行 {len(cases)} 个用例，满分 {sum(c.full_score for c in cases)} 分")
+        await run_all(cases, verbose=verbose)
+        print(f"\n日志已保存至: {log_path}")
+    finally:
+        sys.stdout = tee._stdout
+        tee.close()
 
 
 if __name__ == "__main__":

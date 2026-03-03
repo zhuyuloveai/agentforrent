@@ -1,8 +1,9 @@
 """临时脚本：测试 API key 和模型可用性"""
 import httpx
 import json
+import os
 
-API_KEY = "sk-c215a6597a284c9ca699f57aa6c0646e"
+API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 

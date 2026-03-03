@@ -71,11 +71,21 @@ def _extract_houses_from_collected(tool_results: list) -> list[str]:
     for tr in tool_results:
         try:
             data = json.loads(tr["output"])
-            items = data.get("data", {})
-            if isinstance(items, dict):
-                items = items.get("items", [])
-            if isinstance(items, list):
-                for item in items:
+            inner = data.get("data", {})
+            if isinstance(inner, dict):
+                # 单套房源详情（get_house_detail / rent_house / offline_house 等）
+                hid = inner.get("house_id")
+                if hid and hid not in houses:
+                    houses.append(hid)
+                # 列表型响应
+                items = inner.get("items", [])
+                if isinstance(items, list):
+                    for item in items:
+                        hid = item.get("house_id") or item.get("id")
+                        if hid and hid not in houses:
+                            houses.append(hid)
+            elif isinstance(inner, list):
+                for item in inner:
                     hid = item.get("house_id") or item.get("id")
                     if hid and hid not in houses:
                         houses.append(hid)

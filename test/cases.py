@@ -72,7 +72,7 @@ class WriteOp:
     """写操作期望验证"""
     house_id: str           # 被操作的 house_id；"dynamic"=运行时从工具结果中提取
     action: str             # rent / terminate / offline
-    expected_status: str    # rented / available / offline
+    expected_status: str    # 已租 / 可租 / 下架
     platform: str = "安居客"  # 写操作使用的平台
 
 
@@ -100,8 +100,9 @@ class TestCase:
 
     turns: List[str]                             # 用户输入序列
 
-    # 基准集来源（四选一；Chat 类全部为 None）
+    # 基准集来源（五选一；Chat 类全部为 None）
     baseline_query: Optional[Dict] = None        # 直接调用 /api/houses/by_platform
+    baseline_queries: Optional[List[Dict]] = None  # 多次调用 /api/houses/by_platform 取并集（用于跨区OR查询）
     baseline_house_id: Optional[str] = None      # 固定单套（详情/写操作场景）
     baseline_nearby: Optional[NearbyBaseline] = None          # 已知 landmark_id 的附近查询
     baseline_landmark: Optional[LandmarkNameBaseline] = None  # 动态查找 landmark 的附近查询
@@ -326,13 +327,12 @@ SINGLE_COMPLEX_CASES: List[TestCase] = [
     TestCase(
         id="SC7", name="跨区域+三维筛选", case_type="Single", full_score=15,
         turns=["海淀或朝阳区整租两居室精装修有哪些"],
-        baseline_query={
-            "district": "海淀,朝阳", "rental_type": "整租",
-            "bedrooms": "2", "decoration": "精装", "page_size": 100,
-        },
-        notes="基准集用 district='海淀,朝阳' 单次查询（假设 API 支持逗号分隔）；"
-              "若 agent 分两次查询后合并结果，行为等价但路径不同，评分不受影响；"
-              "若 mock server 不支持逗号分隔 district，基准集为空 → 强制0分，请先确认 API 支持。",
+        baseline_queries=[
+            {"district": "海淀", "rental_type": "整租", "bedrooms": "2", "decoration": "精装", "page_size": 100},
+            {"district": "朝阳", "rental_type": "整租", "bedrooms": "2", "decoration": "精装", "page_size": 100},
+        ],
+        notes="基准集 = 海淀 + 朝阳 各自查询结果取并集（支持逗号分隔的 API 已废弃此设计）；"
+              "agent 应对每个区分别调用 search_houses（规则6），结果合并后与基准集比对。",
     ),
     TestCase(
         id="SC8", name="平台挂牌信息（get_house_listings）", case_type="Single", full_score=15,
@@ -553,7 +553,7 @@ MULTI_COMPLEX_CASES: List[TestCase] = [
             "page_size": 100,
         },
         write_ops=[
-            WriteOp(house_id="dynamic", action="rent", expected_status="rented", platform="链家"),
+            WriteOp(house_id="dynamic", action="rent", expected_status="已租", platform="链家"),
         ],
         notes="4 轮（3 查询轮 + 1 写操作轮）；写操作 house_id 从工具结果动态提取",
     ),
@@ -565,7 +565,7 @@ MULTI_COMPLEX_CASES: List[TestCase] = [
         ],
         baseline_house_id="HF_150",
         write_ops=[
-            WriteOp(house_id="HF_150", action="offline", expected_status="offline", platform="安居客"),
+            WriteOp(house_id="HF_150", action="offline", expected_status="下架", platform="安居客"),
         ],
         notes="固定 house_id=HF_150；第1轮 get_house_detail，第2轮 offline_house；"
               "验证：API状态=offline + houses含HF_150",
@@ -581,8 +581,8 @@ MULTI_COMPLEX_CASES: List[TestCase] = [
             "district": "朝阳", "rental_type": "整租", "bedrooms": "1", "page_size": 100,
         },
         write_ops=[
-            WriteOp(house_id="dynamic", action="rent", expected_status="rented", platform="58同城"),
-            WriteOp(house_id="dynamic", action="terminate", expected_status="available", platform="58同城"),
+            WriteOp(house_id="dynamic", action="rent", expected_status="可租", platform="58同城"),
+            WriteOp(house_id="dynamic", action="terminate", expected_status="可租", platform="58同城"),
         ],
         notes="实测基准 5 套 [S]；先租后退租，最终状态恢复 available",
     ),
@@ -596,7 +596,7 @@ MULTI_COMPLEX_CASES: List[TestCase] = [
             "district": "海淀", "rental_type": "整租", "bedrooms": "2", "page_size": 100,
         },
         write_ops=[
-            WriteOp(house_id="dynamic", action="offline", expected_status="offline", platform="链家"),
+            WriteOp(house_id="dynamic", action="offline", expected_status="下架", platform="链家"),
         ],
         notes="测试 search→offline 链路（dynamic house_id）；与 MC2 的 detail→offline 互补",
     ),
@@ -612,7 +612,7 @@ MULTI_COMPLEX_CASES: List[TestCase] = [
             "decoration": "精装", "max_price": 10000, "page_size": 100,
         },
         write_ops=[
-            WriteOp(house_id="dynamic", action="rent", expected_status="rented", platform="安居客"),
+            WriteOp(house_id="dynamic", action="rent", expected_status="已租", platform="安居客"),
         ],
         notes="用户未指定平台；测试 listing_platform 默认值（安居客）的 P0 Bug 修复；"
               "agent 必须传 listing_platform 否则 API 400 → 0 分",
@@ -630,7 +630,7 @@ MULTI_COMPLEX_CASES: List[TestCase] = [
             "decoration": "精装", "max_price": 8000, "page_size": 100,
         },
         write_ops=[
-            WriteOp(house_id="dynamic", action="rent", expected_status="rented", platform="安居客"),
+            WriteOp(house_id="dynamic", action="rent", expected_status="已租", platform="安居客"),
         ],
         notes="4 轮（search→search→detail→rent）；基准集与 SC1 相同（~1套 HF_438）；"
               "理论得分：查询命中=15 + 写操作=15 = 30/30",
