@@ -97,6 +97,32 @@ def _extract_houses_from_collected(tool_results: list) -> list[str]:
 MAX_TOOL_ROUNDS = 3
 
 
+def _sanitize_messages(messages: list) -> list:
+    """清洗历史消息，避免空 content 导致模型服务器 500。
+    - assistant 消息：content 为 None 时改为空字符串；content 纯空白且无 tool_calls 时跳过
+    - tool/user 消息：content 为 None 时改为空字符串
+    """
+    result = []
+    for msg in messages:
+        msg = dict(msg)  # 浅拷贝，不改原始 session 数据
+        role = msg.get("role")
+        content = msg.get("content")
+
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if content is None:
+                msg["content"] = ""
+            if not str(content or "").strip() and not tool_calls:
+                # 纯空白且没有工具调用的 assistant 消息，跳过
+                continue
+        else:
+            if content is None:
+                msg["content"] = ""
+
+        result.append(msg)
+    return result
+
+
 async def run(
     session_id: str,
     message: str,
@@ -120,8 +146,8 @@ async def run(
         try:
             await rent_api.init_houses()
             logger.info(f"[{session_id}] new session, house data reset")
-        except Exception as e:
-            logger.warning(f"[{session_id}] house data reset failed: {e}")
+        except Exception:
+            pass
 
     # 简单问候，模板回复，0 次模型调用
     if _is_simple_chat(message):
@@ -142,7 +168,9 @@ async def run(
 
     # ── Agent 循环：最多 MAX_TOOL_ROUNDS 轮工具调用 ──
     for round_num in range(1, MAX_TOOL_ROUNDS + 1):
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session_manager.get_messages(session_id)
+        messages = _sanitize_messages(
+            [{"role": "system", "content": SYSTEM_PROMPT}] + session_manager.get_messages(session_id)
+        )
 
         llm_ctx = tracer.begin_llm_call(round_num, len(messages)) if tracer else None
         response = await client.chat_completion(messages=messages, tools=TOOLS)
@@ -187,7 +215,9 @@ async def run(
     else:
         # 超出最大轮数，强制调用一次（不传 tools）生成最终回复
         logger.warning(f"[{session_id}] max tool rounds ({MAX_TOOL_ROUNDS}) exhausted, forcing final response")
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + session_manager.get_messages(session_id)
+        messages = _sanitize_messages(
+            [{"role": "system", "content": SYSTEM_PROMPT}] + session_manager.get_messages(session_id)
+        )
 
         llm_ctx = tracer.begin_llm_call(MAX_TOOL_ROUNDS + 1, len(messages), forced=True) if tracer else None
         forced_resp = await client.chat_completion(messages=messages)

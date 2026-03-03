@@ -31,43 +31,12 @@ class ModelClient:
         messages: List[Dict[str, str]],
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.7,
-        max_retries: int = 3,
     ) -> dict:
-        """调用模型进行对话补全，支持自动重试"""
-        last_exc = None
-        for attempt in range(1, max_retries + 1):
-            try:
-                if self.debug_mode:
-                    return await self._call_debug_model(messages, tools, temperature)
-                else:
-                    return await self._call_judge_model(messages, tools, temperature)
-            except httpx.HTTPStatusError as e:
-                # 5xx 服务端错误（如 504 Gateway Timeout）才重试，4xx 不重试
-                if e.response.status_code >= 500:
-                    last_exc = e
-                    if attempt < max_retries:
-                        wait = attempt * 5
-                        logger.warning(f"Model call HTTP {e.response.status_code} (attempt {attempt}/{max_retries}), retrying in {wait}s")
-                        await asyncio.sleep(wait)
-                    else:
-                        logger.error(f"Model call failed after {max_retries} attempts: {e}")
-                else:
-                    raise
-            except (
-                httpx.ConnectError,
-                httpx.ReadTimeout,
-                httpx.WriteTimeout,
-                httpx.RemoteProtocolError,
-                httpx.ProxyError,
-            ) as e:
-                last_exc = e
-                if attempt < max_retries:
-                    wait = attempt * 3
-                    logger.warning(f"Model call failed (attempt {attempt}/{max_retries}): {type(e).__name__}: {e}, retrying in {wait}s")
-                    await asyncio.sleep(wait)
-                else:
-                    logger.error(f"Model call failed after {max_retries} attempts: {e}")
-        raise last_exc
+        """调用模型进行对话补全"""
+        if self.debug_mode:
+            return await self._call_debug_model(messages, tools, temperature)
+        else:
+            return await self._call_judge_model(messages, tools, temperature)
 
     async def _call_debug_model(
         self,
