@@ -464,7 +464,8 @@ async def run_all(cases: List[TestCase] = None, verbose: bool = True) -> List[di
     all_results = []
     type_stats: dict = {}
 
-    for case in cases:
+    for idx, case in enumerate(cases, 1):
+        print(f"\n▶ [{idx}/{len(cases)}] {case.id}  {case.name}  ({case.case_type}, {case.full_score}分)", flush=True)
         try:
             res = await run_case(case, verbose=verbose)
         except Exception as exc:
