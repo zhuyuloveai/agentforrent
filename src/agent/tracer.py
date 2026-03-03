@@ -36,12 +36,32 @@ class RunTracer:
     def mark_simple_chat(self) -> None:
         self.is_simple_chat = True
 
-    def begin_llm_call(self, round_num: int, messages_count: int, forced: bool = False) -> dict:
+    def begin_llm_call(
+        self,
+        round_num: int,
+        messages_count: int,
+        forced: bool = False,
+        messages: list = None,
+    ) -> dict:
         """开始计时一次 LLM 调用，返回上下文 ctx，传给 end_llm_call。"""
+        # 记录发给模型的消息快照：保留 role，content 截断到 300 字符
+        snapshot = []
+        for m in (messages or []):
+            role = m.get("role", "")
+            content = m.get("content") or ""
+            tool_calls = m.get("tool_calls")
+            entry = {"role": role, "content": content[:300] + ("…" if len(content) > 300 else "")}
+            if tool_calls:
+                entry["tool_calls"] = [
+                    {"name": tc["function"]["name"], "args": tc["function"].get("arguments", "")[:200]}
+                    for tc in tool_calls
+                ]
+            snapshot.append(entry)
         return {
             "round_num": round_num,
             "forced": forced,
             "messages_count": messages_count,
+            "messages_snapshot": snapshot,
             "_t": time.time(),
         }
 
@@ -57,14 +77,14 @@ class RunTracer:
             "round_num": ctx["round_num"],
             "forced": ctx["forced"],
             "messages_count": ctx["messages_count"],
+            "messages_snapshot": ctx.get("messages_snapshot", []),
             "duration_ms": duration_ms,
             "finish_reason": choice.get("finish_reason", "unknown"),
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
             "total_tokens": usage.get("total_tokens", 0),
             "tool_calls_requested": [tc["function"]["name"] for tc in tool_calls],
-            # 只保留前500字符，避免文件过大
-            "raw_content": (msg.get("content") or "")[:500],
+            "raw_content": msg.get("content") or "",
         })
 
     def record_tool_call(

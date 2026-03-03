@@ -172,7 +172,7 @@ async def run(
             [{"role": "system", "content": SYSTEM_PROMPT}] + session_manager.get_messages(session_id)
         )
 
-        llm_ctx = tracer.begin_llm_call(round_num, len(messages)) if tracer else None
+        llm_ctx = tracer.begin_llm_call(round_num, len(messages), messages=messages) if tracer else None
         response = await client.chat_completion(messages=messages, tools=TOOLS)
         if tracer and llm_ctx:
             tracer.end_llm_call(llm_ctx, response)
@@ -219,7 +219,7 @@ async def run(
             [{"role": "system", "content": SYSTEM_PROMPT}] + session_manager.get_messages(session_id)
         )
 
-        llm_ctx = tracer.begin_llm_call(MAX_TOOL_ROUNDS + 1, len(messages), forced=True) if tracer else None
+        llm_ctx = tracer.begin_llm_call(MAX_TOOL_ROUNDS + 1, len(messages), forced=True, messages=messages) if tracer else None
         forced_resp = await client.chat_completion(messages=messages)
         if tracer and llm_ctx:
             tracer.end_llm_call(llm_ctx, forced_resp)
