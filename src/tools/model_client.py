@@ -114,8 +114,8 @@ class ModelClient:
             "Content-Type": "application/json",
             "Authorization": "Bearer sk-placeholder",
         }
-        if self.model_ip:
-            headers["Session-ID"] = self.model_ip
+        if self.session_id:
+            headers["Session-ID"] = self.session_id
 
         payload = {
             "model": "",  # 评测环境模型名由判题器决定
@@ -137,10 +137,17 @@ class ModelClient:
                 logger.info(f"Judge model OK in {elapsed:.1f}s (session={self.session_id})")
                 return r.json()
             except Exception as e:
+                truncated_msgs = [
+                    {
+                        "role": m.get("role"),
+                        "content": (str(m.get("content", ""))[:80] + "…") if len(str(m.get("content", ""))) > 80 else m.get("content"),
+                    }
+                    for m in payload.get("messages", [])
+                ]
+                log_payload = {**payload, "messages": truncated_msgs}
                 logger.error(
                     f"Judge model request failed: {e}\n"
                     f"  URL: POST {url}\n"
-                    f"  Headers: {headers}\n"
-                    f"  Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}"
+                    f"  Payload: {json.dumps(log_payload, ensure_ascii=False, indent=2)}"
                 )
                 raise
